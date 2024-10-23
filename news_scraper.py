@@ -2,125 +2,137 @@ from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.common.exceptions import TimeoutException
 import time
-
-
-# url = "https://www.reddit.com/r/Conservative/top/?t=year"
-# driver.get(url)
-# time.sleep(5)
-# elements = driver.find_elements(By.CLASS_NAME, "inset-0")
-# urls = []
-# comments = []
-# for e in elements:
-#     href = e.get_attribute("href")
-#     if href is not None:
-#         urls.append(href)
-
-# for u in url:
-#     driver.get(url)
-#     time.sleep(5)
-# lengths = []
-# for i in range(10):
-#     url = "https://www.reddit.com/r/Conservative/comments/1d4el7p/breaking_trump_found_guilty_on_all_34_charges/"
-#     driver.get(url)
-#     time.sleep(1)
-#     comments = []
-#     elements = driver.find_elements(By.XPATH, '//div[@id="-post-rtjson-content"]/p')
-#     for element in elements:
-#         print(element.text)
-#         comments.append(element.text)
-
-#     lengths.append(len(comments))
-# print(lengths)
+import pandas as pd
+import pprint
 
 
 class AggregateRedditComments:
+    url_base = "https://www.reddit.com/r/"
+    conservative_middles = [
+        "Conservatives",
+        "asktrumpsupporters",
+        "prolife",
+        "askconservatives",
+        "capitalism",
+        "republican",
+        "walkaway",
+        "progun",
+        "Conservative",
+    ]
+    liberal_middles = [
+        "Liberal",
+        "dsa",
+        "WayOfTheBern",
+        "Progressive",
+        "murderedbyaoc",
+        "esist",
+        "askaliberal",
+        "democrats",
+        "joebiden",
+    ]
+    url_suffix = "/top/?t=year"
+
     def __init__(self, *args, **kwargs):
         self.comments = []
-        self.posts = []
-        self.subreddit_lengths = []
-        self.comment_lengths = []
+        self.liberal_posts = []
+        self.conservative_posts = []
+        self.liberal_comments = []
+        self.conservative_comments = []
+        self.reddit_df = pd.DataFrame(
+            columns=["Political Leaning", "Subreddit", "Comment Title", "Comment Text"]
+        )
 
-    def get_subreddit_posts(self, subreddit):
-        print(subreddit)
+    def get_subreddit_posts(self, subreddit, subreddit_type):
         posts = []
         self.driver = webdriver.Edge()
-        self.driver.get(subreddit)
+        url = self.url_base + subreddit + self.url_suffix
+        self.driver.get(url)
         time.sleep(10)
         elements = self.driver.find_elements(By.CLASS_NAME, "inset-0")
         for element in elements:
             href = element.get_attribute("href")
             if href is not None:
                 posts.append(href)
-        self.posts.append(posts)
-        # self.get_subreddit_comments(posts)
+        if subreddit_type == "C":
+            self.conservative_posts.append(posts)
+        elif subreddit_type == "L":
+            self.liberal_posts.append(posts)
         self.driver.quit()
-        time.sleep(2)
-        self.subreddit_lengths.append(len(posts))
 
-    def get_subreddit_comments(self, posts):
-        for post in posts:
-            self.driver = webdriver.Edge()
+    def get_subreddit_comments(self, post, subreddit_type):
+        try:
+            title = post.split("/")[-2].replace("_", " ").title()
+            subreddit = post.split("/")[4]
+        except IndexError:
             print(post)
-            self.driver.get(post)
-            time.sleep(1)
-            elements = self.driver.find_elements(
-                By.XPATH, '//div[@id="-post-rtjson-content"]/p'
-            )
-
-            self.comment_lengths.append(len(elements))
+            return False
+        self.driver = webdriver.Edge()
+        self.driver.get(post)
+        time.sleep(1)
+        elements = self.driver.find_elements(
+            By.XPATH, '//div[@id="-post-rtjson-content"]/p'
+        )
+        if subreddit_type == "C":
             for element in elements:
-                self.comments.append(element.text)
-            self.driver.quit()
+                self.conservative_comments.append(element.text)
+                self.add_to_dataframe("Conservative", subreddit, title, element.text)
+        elif subreddit_type == "L":
+            for element in elements:
+                self.liberal_comments.append(element.text)
+                self.add_to_dataframe("Liberal", subreddit, title, element.text)
+
+        self.driver.quit()
+
+    def add_to_dataframe(self, subreddit_type, subreddit, comment_title, comment_text):
+        new_row = {
+            "Political Leaning": subreddit_type,
+            "Subreddit": subreddit,
+            "Comment Title": comment_title,
+            "Comment Text": comment_text,
+        }
+        self.reddit_df = pd.concat(
+            [self.reddit_df, pd.DataFrame([new_row])], ignore_index=True
+        )
+
+    def create_excel_file(self):
+        self.reddit_df.to_excel("RedditExcelOutput.xlsx", engine="xlsxwriter")
 
 
 if __name__ == "__main__":
     start = time.perf_counter()
-    url_base = "https://www.reddit.com/r/"
-    # url_middles = [
-    #     "Conservative",
-    #     "Conservatives",
-    #     "asktrumpsupporters",
-    #     "prolife",
-    #     "askconservatives",
-    #     "capitalism",
-    #     "republican",
-    #     "walkaway",
-    #     "progun",
-    # ]
-    url_middles = [
-        # "Liberal",
-        # "dsa",
-        # "WayOfTheBern",
-        # "Progressive",
-        # "murderedbyaoc",
-        # "esist",
-        # "askaliberal",
-        # "democrats",
-        "joebiden",
-    ]
-    url_suffix = "/top/?t=year"
 
     reddit_driver = AggregateRedditComments()
-
-    for middle in url_middles:
-        reddit_driver.get_subreddit_posts(url_base + middle + url_suffix)
-
-    print(reddit_driver.subreddit_lengths)
-    print(reddit_driver.comment_lengths)
-
-    for post in reddit_driver.posts:
+    for subreddit in reddit_driver.conservative_middles:
         try:
-            reddit_driver.get_subreddit_comments(post)
+            reddit_driver.get_subreddit_posts(subreddit, "C")
         except TimeoutException:
-            print(post)
+            reddit_driver.conservative_middles.append(subreddit)
             pass
 
-    print(reddit_driver.comments)
-    print(reddit_driver.comment_lengths)
+    pprint.pprint(reddit_driver.conservative_middles)
 
-    with open("r_joebiden.txt", "w", encoding="utf-8") as f:
-        for comment in reddit_driver.comments:
-            f.write(f"{comment}\n")
+    pprint.pprint(reddit_driver.conservative_posts)
+
+    for post_group in reddit_driver.conservative_posts:
+        for post in post_group:
+            reddit_driver.get_subreddit_comments(post, "C")
+
+    for subreddit in reddit_driver.liberal_middles:
+        try:
+            reddit_driver.get_subreddit_posts(subreddit, "L")
+        except TimeoutException:
+            reddit_driver.liberal_middles.append(subreddit)
+            pass
+
+    pprint.pprint(reddit_driver.liberal_middles)
+
+    pprint.pprint(reddit_driver.liberal_posts)
+
+    for post_group in reddit_driver.liberal_posts:
+        for post in post_group:
+            reddit_driver.get_subreddit_comments(post, "L")
+
+    reddit_driver.create_excel_file()
 
     end = time.perf_counter()
     print(end - start)
